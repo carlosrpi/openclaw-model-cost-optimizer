@@ -212,8 +212,8 @@ def display_profile(profile: ManagedProfile | None) -> str:
 
 def display_profile_compact(profile: ManagedProfile | None) -> str:
     if profile is None:
-        return "<Unknown profile>"
-    return f"<{profile.model_ref} {display_level(profile.thinking)}>"
+        return "Unknown profile"
+    return f"{profile.model_ref} {display_level(profile.thinking)}"
 
 
 def parse_balance_bands(raw_bands: Any, default_provider: str) -> tuple[BalanceBand, ...]:
@@ -839,19 +839,31 @@ def format_notification_message(
     week_text = format_percentage(usage.week_left)
     five_reset_text = format_duration_minutes(usage.five_hour_reset_in_minutes)
     week_reset_text = format_duration_minutes(usage.week_reset_in_minutes)
-    header = (
-        f"{settings.notifications_message_prefix}: test notification for {target_text}."
-        if test
-        else f"Model changed from {previous_text} to {target_text}"
-    )
+    separator = "." * 49
+    if test:
+        header_lines = [
+            separator,
+            f"{settings.notifications_message_prefix} test notification",
+            f"Target: {target_text}",
+        ]
+    else:
+        header_lines = [
+            separator,
+            "Model changed",
+            f"From: {previous_text}",
+            f"To:   {target_text}",
+        ]
     quota_lines = (
         f"5h balance at {five_text} will be reset in {five_reset_text}\n"
         f"Weekly balance at {week_text} will be reset in {week_reset_text}"
     )
     if settings.notifications_include_reasons and decision.reasons:
         reason_text = build_reason_text(decision)
-        return f"{header}\nReason: {reason_text}\n-----------------------------------------------------\n{quota_lines}"
-    return f"{header}\n-----------------------------------------------------\n{quota_lines}"
+        return (
+            "\n".join(header_lines)
+            + f"\nReason: {reason_text}\n{separator}\n{quota_lines}\n{separator}"
+        )
+    return "\n".join(header_lines) + f"\n{separator}\n{quota_lines}\n{separator}"
 
 
 def send_notification_message(
