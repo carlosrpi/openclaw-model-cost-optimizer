@@ -67,7 +67,7 @@ allow_highest_band = false
 
 [notifications]
 enabled = false
-message_prefix = "ModelCostOptimizer"
+message_prefix = "Test message"
 
 # Include the first decision reason in the notification message.
 include_reasons = true
