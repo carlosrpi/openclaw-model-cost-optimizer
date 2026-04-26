@@ -1,22 +1,35 @@
 # OpenClaw Model Cost Optimizer
 
-This project automatically adjusts the OpenClaw LLM model and the `thinking` level (`low`, `medium`, `high`) based on the remaining Codex quota.
+This utility automatically adjusts the OpenClaw LLM model and `thinking` level (`low`, `medium`, `high`) based on the remaining Codex quota.
 
-It is intentionally kept outside the OpenClaw installation so it is easy to:
+## Why I Made This
 
+I was using OpenClaw with OpenAI OAuth and ran into quota limitations when selecting the most capable models and higher reasoning levels. OpenAI applies quota limits that reset both every five hours and weekly. Monitoring both quota windows and manually adjusting the LLM model configuration was repetitive and easy to overlook, so an automated approach felt worthwhile. I built this project to automate those policy changes and reduce the risk of running into quota limits.
+I purposely kept this optimizer outside the OpenClaw installation so it is easier to:
 - back up separately
 - move to another machine
 - version independently
 - refine without mixing watchdog files into OpenClaw state folders
 
+## Features
+
+- Automatically selects a target model and `thinking` level from configurable quota bands
+- Supports temporary reset-soon upgrades and a weekly low-balance safety override
+- Runs as an external watchdog using `systemd --user`, not as an OpenClaw patch or plugin
+- Optionally enforces the selected profile on recent matching direct sessions in addition to changing global defaults
+- Can send optional notifications through OpenClaw when it actually applies a change
+- Uses a local TOML policy file for reproducible behavior
+- Includes an installer that validates prerequisites and renders machine-specific files
+- Includes a matching uninstall script that safely removes the local `systemd --user` wiring
+
 ## Current Scope
 
 The current implementation is intentionally narrow:
 
-- it is designed for OpenClaw setups using `openai-codex` OAuth-based
+- it is designed for OpenClaw setups that use `openai-codex` through OAuth
 - it expects OpenClaw usage snapshots to expose the `openai-codex` provider
 
-The installer checks for this and stops with a clear message if the machine does not look like an `openai-codex` OAuth-based setup.
+The installer checks for this and stops with a clear message if the machine does not look like a compatible `openai-codex` OAuth-based setup.
 
 ## What It Is
 
@@ -26,7 +39,6 @@ The watchdog is an external automation made of:
 - a `systemd --user` one-shot service
 - a Python script
 - a local TOML policy file
-- a small local state file
 - an installer script that renders machine-specific files
 - optional outbound notifications sent through OpenClaw
 
@@ -39,7 +51,7 @@ The runtime architecture is:
 1. A `systemd --user` timer triggers the optimizer periodically.
 2. The timer starts a `systemd --user` one-shot service.
 3. That service runs `python openclaw-model-cost-optimizer.py`.
-4. The Python script reads the local `config.toml`, reads its local state file, asks OpenClaw for the current usage snapshot, computes the target model/thinking profile, and only then applies changes if needed.
+4. The Python script reads the local `config.toml`, asks OpenClaw for the current usage snapshot, computes the target model/thinking profile, and only then applies changes if needed.
 5. OpenClaw itself remains external to this project. The optimizer does not run inside OpenClaw and does not patch OpenClaw source code.
 
 Inside the Python script, the logical flow is:
@@ -59,20 +71,19 @@ Inside the Python script, the logical flow is:
    - and the weekly reset is still more than `weekly_balance.days_left_override_condition` days away
    - then force band `1`
 5. Convert the final band into a target `model + thinking` profile.
-6. Compare that target profile with the current OpenClaw defaults and the optimizer's session-management bookkeeping.
+6. Compare that target profile with the current OpenClaw defaults and, if enabled, with relevant recent direct sessions.
 7. If a change is needed, apply it through official OpenClaw interfaces:
    - `openclaw models set ...`
    - `openclaw config set agents.defaults.thinkingDefault ...`
-   - `openclaw gateway call sessions.patch ...` for managed sessions
+   - `openclaw gateway call sessions.patch ...` for relevant recent direct sessions
 8. If notifications are enabled and the optimizer actually changes OpenClaw during this run, send the message through OpenClaw.
-9. Save the optimizer state file for later session-reconciliation bookkeeping.
 
 In short, the timer/service layer is only the scheduler. The real decision logic lives in the Python script, and the Python script treats OpenClaw as an external system that it reads from and updates through supported commands.
 
 ## Repository Layout
 
 - `openclaw-model-cost-optimizer.py`
-  Main script. It reads usage, applies policy, updates OpenClaw, and writes local watchdog state.
+  Main script. It reads usage, applies policy, and updates OpenClaw.
 
 - `config.example.toml`
   Template for the local policy file. The installer renders this into `config.toml`.
@@ -86,6 +97,9 @@ In short, the timer/service layer is only the scheduler. The real decision logic
 - `install.sh`
   Setup script. It validates prerequisites, renders local files, installs the user service/timer, and optionally starts them.
 
+- `uninstall.sh`
+  Teardown script. It disables the user timer, removes the installed unit symlinks, removes the generated service file, and can optionally purge local runtime files.
+
 - `README.md`
   This documentation.
 
@@ -93,7 +107,6 @@ Generated locally by the installer:
 
 - `config.toml`
 - `openclaw-model-cost-optimizer.service`
-- `openclaw-model-cost-optimizer.json`
 
 ## Installation
 
@@ -141,6 +154,33 @@ Supported options:
 - `--openclaw-config PATH`
   Override the OpenClaw config path.
 
+## Uninstallation
+
+Stop and remove the installed `systemd --user` wiring:
+
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+Default uninstall behavior:
+
+1. Disables and stops the timer.
+2. Stops the one-shot service if it is currently running.
+3. Removes the installed user-level `systemd` symlinks when they still point to this project.
+4. Removes the generated `openclaw-model-cost-optimizer.service` file from the project directory.
+5. Reloads `systemd --user`.
+
+By default, the uninstall script keeps:
+
+- `config.toml`
+
+Use this if you also want to remove `config.toml` and any legacy local state file from older versions:
+
+```bash
+./uninstall.sh --purge
+```
+
 ## Configuration File
 
 The policy lives in `config.toml`.
@@ -161,9 +201,6 @@ Example rendered config:
 bin = "/home/example/.npm-global/bin/openclaw"
 config_path = "/home/example/.openclaw/openclaw.json"
 provider = "openai-codex"
-
-[files]
-state_path = "/home/example/openclawModelCostOptimizer/openclaw-model-cost-optimizer.json"
 
 [behavior]
 manage_sessions = true
@@ -221,8 +258,7 @@ Important behavior that is not obvious from the example alone:
 - `openclaw.provider` decides which provider block is read from `openclaw status --json --usage`.
 - The same `openclaw.provider` value is also used to normalize bare model names and to ignore sessions that belong to a different provider.
 - `behavior.manage_sessions = false` keeps the optimizer at the global-default level only and skips `sessions.patch`.
-- `behavior.active_minutes` is forwarded to `openclaw sessions --active ...` so only recently active sessions are considered for automatic reconciliation.
-- `files.state_path` stores the last applied profile plus the per-session bookkeeping used for later session reconciliation. Notifications do not depend on that history.
+- `behavior.active_minutes` is forwarded to `openclaw sessions --active ...` so only recently active sessions are considered for enforcement.
 
 ## Current Policy
 
@@ -308,7 +344,7 @@ Each notification destination can also set:
 
 Recommended initial notification policy:
 
-- notify every time the optimizer actually changes OpenClaw defaults or managed sessions
+- notify every time the optimizer actually changes OpenClaw defaults or patches sessions
 
 Example notification config:
 
@@ -348,17 +384,15 @@ If a session already has a stored `thinkingLevel` or a stored model selection, t
 
 1. Update the global OpenClaw default model.
 2. Update the global OpenClaw default thinking level.
-3. Patch matching direct sessions that appear to still be under automatic control.
-
-If a session looks manually overridden, the watchdog skips it instead of blindly overwriting it.
+3. Patch relevant recent direct sessions when they differ from the rule-selected target profile.
 
 More specifically, the current implementation only considers:
 
 - direct sessions
 - sessions whose provider matches `openclaw.provider`
-- sessions whose current profile still matches either the last profile previously managed for that session or the previous global default profile
+- sessions returned by the optional `behavior.active_minutes` filter when that setting is enabled
 
-That heuristic is the current definition of "still under automatic control".
+If one of those sessions differs from the current target profile, the watchdog patches it. The optimizer does not keep a separate ownership history for sessions anymore.
 
 ## What The Watchdog Changes
 
@@ -374,10 +408,6 @@ Those operations end up changing OpenClaw state such as:
 
 - `~/.openclaw/openclaw.json`
 - `~/.openclaw/agents/main/sessions/sessions.json`
-
-The only file written directly by the watchdog itself is:
-
-- `openclaw-model-cost-optimizer.json`
 
 ## Does OpenClaw Need To Know This Exists?
 
@@ -403,13 +433,13 @@ From OpenClaw's point of view, the watchdog is just an external actor that somet
 Run one manual pass:
 
 ```bash
-python3 ./openclaw-model-cost-optimizer.py --settings-file ./config.toml --json
+python3 ./openclaw-model-cost-optimizer.py --settings-file ./config.toml
 ```
 
 Run a simulation without changing anything:
 
 ```bash
-python3 ./openclaw-model-cost-optimizer.py --settings-file ./config.toml --dry-run --json
+python3 ./openclaw-model-cost-optimizer.py --settings-file ./config.toml --dry-run
 ```
 
 Send a test notification without waiting for a quota-driven level change:
@@ -457,7 +487,6 @@ The current version includes a few defensive checks aimed at making the project 
 
 Likely next improvements:
 
-- add an uninstall script
-- refine manual-vs-automatic session detection
+- add optional include/exclude rules for which sessions should be patched
 - support more nuanced reset logic
 - add optional metrics/history output

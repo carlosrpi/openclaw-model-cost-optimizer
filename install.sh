@@ -117,10 +117,9 @@ mkdir -p "$SYSTEMD_USER_DIR"
 
 CONFIG_TEMPLATE="$PROJECT_DIR/config.example.toml"
 CONFIG_OUTPUT="$PROJECT_DIR/config.toml"
-STATE_PATH="$PROJECT_DIR/openclaw-model-cost-optimizer.json"
 
 if [[ ! -f "$CONFIG_OUTPUT" || "$FORCE_CONFIG" -eq 1 ]]; then
-  python3 - "$CONFIG_TEMPLATE" "$CONFIG_OUTPUT" "$OPENCLAW_BIN" "$OPENCLAW_CONFIG_PATH" "$STATE_PATH" <<'PY'
+  python3 - "$CONFIG_TEMPLATE" "$CONFIG_OUTPUT" "$OPENCLAW_BIN" "$OPENCLAW_CONFIG_PATH" <<'PY'
 import sys
 from pathlib import Path
 
@@ -128,12 +127,10 @@ template_path = Path(sys.argv[1])
 output_path = Path(sys.argv[2])
 openclaw_bin = sys.argv[3]
 openclaw_config = sys.argv[4]
-state_path = sys.argv[5]
 
 content = template_path.read_text(encoding="utf-8")
 content = content.replace("__OPENCLAW_BIN__", openclaw_bin)
 content = content.replace("__OPENCLAW_CONFIG_PATH__", openclaw_config)
-content = content.replace("__STATE_PATH__", state_path)
 output_path.write_text(content, encoding="utf-8")
 PY
   echo "Wrote $CONFIG_OUTPUT"

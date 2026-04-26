@@ -8,9 +8,6 @@ bin = "__OPENCLAW_BIN__"
 config_path = "__OPENCLAW_CONFIG_PATH__"
 provider = "openai-codex"
 
-[files]
-state_path = "__STATE_PATH__"
-
 [behavior]
 manage_sessions = true
 active_minutes = 1440

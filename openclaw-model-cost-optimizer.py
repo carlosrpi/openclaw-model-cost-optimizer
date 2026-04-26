@@ -7,7 +7,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +41,6 @@ class Settings:
     settings_file: Path
     openclaw_bin: str
     openclaw_config_path: Path
-    state_path: Path
     provider: str
     manage_sessions: bool
     active_minutes: int | None
@@ -104,20 +102,11 @@ def parse_args() -> argparse.Namespace:
         help="Compute and print actions without modifying OpenClaw.",
     )
     parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Print the final summary as JSON.",
-    )
-    parser.add_argument(
         "--test-notification",
         action="store_true",
         help="Send a test notification to configured destinations and exit.",
     )
     return parser.parse_args()
-
-
-def ensure_file_parent(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def load_toml_file(path: Path) -> dict[str, Any]:
@@ -314,7 +303,6 @@ def load_settings(settings_file: Path) -> Settings:
     base_dir = settings_file.parent
 
     openclaw_cfg = raw.get("openclaw", {})
-    files_cfg = raw.get("files", {})
     behavior_cfg = raw.get("behavior", {})
     five_hour_balance_cfg = raw.get("five_hour_balance", {})
     weekly_cfg = raw.get("weekly_balance", raw.get("weekly", {}))
@@ -348,11 +336,6 @@ def load_settings(settings_file: Path) -> Settings:
             openclaw_cfg.get("config_path"),
             base_dir,
             Path.home() / ".openclaw" / "openclaw.json",
-        ),
-        state_path=resolve_path(
-            files_cfg.get("state_path"),
-            base_dir,
-            base_dir / "openclaw-model-cost-optimizer.json",
         ),
         provider=provider,
         manage_sessions=bool(behavior_cfg.get("manage_sessions", True)),
@@ -408,15 +391,6 @@ def load_json_file(path: Path, default: Any) -> Any:
         return default
     with path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
-
-
-def save_json_file(path: Path, payload: Any) -> None:
-    ensure_file_parent(path)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent) as fh:
-        json.dump(payload, fh, indent=2, sort_keys=True)
-        fh.write("\n")
-        temp_name = fh.name
-    Path(temp_name).replace(path)
 
 
 def current_default_level(config: dict[str, Any]) -> str | None:
@@ -910,19 +884,15 @@ def send_notification_message(
 def reconcile_sessions(
     settings: Settings,
     target_profile: ManagedProfile,
-    state: dict[str, Any],
     default_profile: ManagedProfile | None,
     dry_run: bool,
-) -> tuple[list[str], list[str]]:
+) -> list[str]:
     if not settings.manage_sessions:
-        return [], []
+        return []
 
     sessions = load_sessions(settings)
-    managed_state = state.setdefault("managed_sessions", {})
-    previous_default = profile_from_state(state.get("last_applied_profile")) or default_profile
 
     updated: list[str] = []
-    skipped: list[str] = []
 
     for session in sessions:
         if not session_matches(settings, session):
@@ -932,37 +902,22 @@ def reconcile_sessions(
             continue
 
         current_profile = resolve_session_profile(settings, session, default_profile)
-        previous_for_session = profile_from_state(managed_state.get(key))
-        auto_owned = (
-            current_profile is None
-            or profiles_equal(current_profile, previous_for_session)
-            or profiles_equal(current_profile, previous_default)
-        )
-
-        if not auto_owned:
-            skipped.append(key)
-            continue
-
         if profiles_equal(current_profile, target_profile):
-            managed_state[key] = profile_to_state(target_profile)
             continue
 
         if not dry_run:
             patch_session_profile(settings, key, target_profile)
-        managed_state[key] = profile_to_state(target_profile)
         updated.append(key)
 
-    return updated, skipped
+    return updated
 
 
 def build_summary(
     usage: UsageSnapshot,
     current_profile: ManagedProfile | None,
-    previous_profile: ManagedProfile | None,
     decision: Decision,
     default_changed: bool,
     updated_sessions: list[str],
-    skipped_sessions: list[str],
     notification_sent_to: list[str],
     dry_run: bool,
 ) -> dict[str, Any]:
@@ -973,7 +928,6 @@ def build_summary(
         "weekly_balance": usage.week_left,
         "weekly_reset_in_minutes": usage.week_reset_in_minutes,
         "current_default_profile": profile_to_state(current_profile),
-        "previous_managed_profile": profile_to_state(previous_profile),
         "raw_5h_band_rank": decision.raw_band.rank,
         "target_band_rank": decision.target_band.rank,
         "target_model": decision.target_profile.model_ref,
@@ -982,17 +936,11 @@ def build_summary(
         "reasons": decision.reasons,
         "default_changed": default_changed,
         "updated_sessions": updated_sessions,
-        "skipped_sessions": skipped_sessions,
         "notification_sent_to": notification_sent_to,
     }
 
 
-def print_summary(summary: dict[str, Any], as_json: bool) -> None:
-    if as_json:
-        json.dump(summary, sys.stdout, indent=2, sort_keys=True)
-        sys.stdout.write("\n")
-        return
-
+def print_summary(summary: dict[str, Any]) -> None:
     five = summary["5h_balance"]
     week = summary["weekly_balance"]
     five_reset = summary["5h_reset_in_minutes"]
@@ -1011,10 +959,6 @@ def print_summary(summary: dict[str, Any], as_json: bool) -> None:
         print("Updated sessions:")
         for key in summary["updated_sessions"]:
             print(f"  - {key}")
-    if summary["skipped_sessions"]:
-        print("Skipped sessions with manual-looking overrides:")
-        for key in summary["skipped_sessions"]:
-            print(f"  - {key}")
     if summary["notification_sent_to"]:
         print("Notifications sent to:")
         for destination in summary["notification_sent_to"]:
@@ -1027,10 +971,7 @@ def main() -> int:
     settings = load_settings(settings_file)
 
     config = load_json_file(settings.openclaw_config_path, default={})
-    state = load_json_file(settings.state_path, default={})
-
     current_profile = current_default_profile(config)
-    previous_profile = profile_from_state(state.get("last_applied_profile")) or current_profile
 
     usage = load_usage_snapshot(settings)
     decision = decide_profile(settings, usage)
@@ -1050,22 +991,19 @@ def main() -> int:
         summary = build_summary(
             usage=usage,
             current_profile=current_profile,
-            previous_profile=previous_profile,
             decision=decision,
             default_changed=False,
             updated_sessions=[],
-            skipped_sessions=[],
             notification_sent_to=delivered,
             dry_run=args.dry_run,
         )
-        print_summary(summary, as_json=args.json)
+        print_summary(summary)
         return 0
 
     default_changed = patch_default_profile(settings, decision.target_profile, current_profile, args.dry_run)
-    updated_sessions, skipped_sessions = reconcile_sessions(
+    updated_sessions = reconcile_sessions(
         settings,
         decision.target_profile,
-        state,
         current_profile,
         args.dry_run,
     )
@@ -1085,24 +1023,16 @@ def main() -> int:
         )
         notification_sent_to = send_notification_message(settings, message, dry_run=args.dry_run)
 
-    if not args.dry_run:
-        state["last_applied_profile"] = profile_to_state(decision.target_profile)
-        state.pop("last_5h_band_rank", None)
-        state.pop("last_weekly_override", None)
-        save_json_file(settings.state_path, state)
-
     summary = build_summary(
         usage=usage,
         current_profile=current_profile,
-        previous_profile=previous_profile,
         decision=decision,
         default_changed=default_changed,
         updated_sessions=updated_sessions,
-        skipped_sessions=skipped_sessions,
         notification_sent_to=notification_sent_to,
         dry_run=args.dry_run,
     )
-    print_summary(summary, as_json=args.json)
+    print_summary(summary)
     return 0
 
 
