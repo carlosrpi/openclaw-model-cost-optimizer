@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the OpenClaw model cost optimizer periodically
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=10m
+AccuracySec=1m
+Persistent=true
+Unit=openclaw-model-cost-optimizer.service
+
+[Install]
+WantedBy=timers.target

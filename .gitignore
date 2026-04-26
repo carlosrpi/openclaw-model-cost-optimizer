@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+AGENTS.md
+previous-sessions-notes.md
+config.toml
+openclaw-model-cost-optimizer.service
+openclaw-model-cost-optimizer.json
+remote_exec.py

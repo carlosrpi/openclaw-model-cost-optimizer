@@ -1,0 +1,80 @@
+# OpenClaw Model Cost Optimizer configuration.
+# This file defines local policy. The Python script implements the mechanics.
+#
+# The installer copies this template to config.toml and fills in the local paths.
+
+[openclaw]
+bin = "__OPENCLAW_BIN__"
+config_path = "__OPENCLAW_CONFIG_PATH__"
+provider = "openai-codex"
+
+[files]
+state_path = "__STATE_PATH__"
+
+[behavior]
+manage_sessions = true
+active_minutes = 1440
+
+[five_hour_balance]
+[[five_hour_balance.bands]]
+rank = 1
+min_pct = 0
+max_pct = 30
+model = "openai-codex/gpt-5.4-mini"
+thinking = "high"
+
+[[five_hour_balance.bands]]
+rank = 2
+min_pct = 30
+max_pct = 60
+model = "openai-codex/gpt-5.4"
+thinking = "medium"
+
+[[five_hour_balance.bands]]
+rank = 3
+min_pct = 60
+max_pct = 100
+model = "openai-codex/gpt-5.4"
+thinking = "high"
+
+[weekly_balance]
+# If the weekly balance percentage is below this threshold AND
+# the weekly reset is still more than this many days away,
+# the final decision is overridden to band 1.
+percentage_override_condition = 15
+days_left_override_condition = 1
+
+[reset_soon]
+enabled = true
+
+# If the 5h window resets within this number of minutes, allow a temporary
+# upgrade over the selected 5h band.
+window_minutes = 10
+
+# Do not apply the reset-soon bonus if weekly quota is below this percentage.
+min_weekly_pct = 45
+
+# Do not apply the reset-soon bonus if the 5h quota is below this percentage.
+min_five_pct = 15
+
+# Maximum number of steps to upgrade when the 5h reset is close.
+# With ranked bands, 1 means "move up by one band".
+max_upgrade_steps = 1
+
+# Recommended initial setting: false for conservative policy.
+# When false, the reset-soon bonus cannot reach the highest band.
+allow_highest_band = false
+
+[notifications]
+enabled = false
+message_prefix = "ModelCostOptimizer"
+
+# Include the first decision reason in the notification message.
+include_reasons = true
+
+[[notifications.destinations]]
+# Example:
+# channel = "telegram"
+# target = "123456789"
+# account = "default"
+# silent = false

@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenClaw model cost optimizer
+After=network-online.target openclaw-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=__HOME_DIR__
+Environment=PATH=/usr/bin:__OPENCLAW_BIN_DIR__:/bin
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=/usr/bin/python3 __PROJECT_DIR__/openclaw-model-cost-optimizer.py --settings-file __PROJECT_DIR__/config.toml
