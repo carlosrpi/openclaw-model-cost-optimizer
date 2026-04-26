@@ -210,6 +210,12 @@ def display_profile(profile: ManagedProfile | None) -> str:
     return f"{profile.model_ref} | thinking {display_level(profile.thinking)}"
 
 
+def display_profile_compact(profile: ManagedProfile | None) -> str:
+    if profile is None:
+        return "<Unknown profile>"
+    return f"<{profile.model_ref} {display_level(profile.thinking)}>"
+
+
 def parse_balance_bands(raw_bands: Any, default_provider: str) -> tuple[BalanceBand, ...]:
     if not isinstance(raw_bands, list) or not raw_bands:
         raise ValueError("five_hour_balance.bands must be a non-empty array of tables")
@@ -827,8 +833,8 @@ def format_notification_message(
     *,
     test: bool,
 ) -> str:
-    previous_text = display_profile(previous_profile)
-    target_text = display_profile(decision.target_profile)
+    previous_text = display_profile_compact(previous_profile)
+    target_text = display_profile_compact(decision.target_profile)
     five_text = format_percentage(usage.five_hour_left)
     week_text = format_percentage(usage.week_left)
     five_reset_text = format_duration_minutes(usage.five_hour_reset_in_minutes)
@@ -836,7 +842,7 @@ def format_notification_message(
     header = (
         f"{settings.notifications_message_prefix}: test notification for {target_text}."
         if test
-        else f"Managed profile changed from {previous_text} to {target_text}"
+        else f"Model changed from {previous_text} to {target_text}"
     )
     quota_lines = (
         f"5h balance at {five_text} will be reset in {five_reset_text}\n"
