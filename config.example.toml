@@ -73,8 +73,22 @@ message_prefix = "ModelCostOptimizer"
 include_reasons = true
 
 [[notifications.destinations]]
-# Example:
-# channel = "telegram"
-# target = "123456789"
-# account = "default"
-# silent = false
+# Replace this example destination with a real one before setting
+# notifications.enabled = true.
+
+# Delivery channel supported by your OpenClaw messaging setup.
+channel = "telegram"
+
+# Destination identifier for the selected channel.
+# For Telegram this is typically the target chat or user id.
+target = "123456789"
+
+# Optional OpenClaw messaging account name.
+# Keep "default" unless you intentionally configured another account.
+account = "default"
+
+# Optional thread identifier when the selected channel supports threads.
+# thread_id = "ops-room"
+
+# When true, request a quiet delivery if the channel supports it.
+silent = false
