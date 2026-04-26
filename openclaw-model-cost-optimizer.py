@@ -774,12 +774,13 @@ def patch_session_profile(settings: Settings, key: str, target_profile: ManagedP
 
 def should_send_notification(
     settings: Settings,
-    previous_profile: ManagedProfile | None,
-    target_profile: ManagedProfile,
+    *,
+    default_changed: bool,
+    updated_sessions: list[str],
 ) -> bool:
     if not settings.notifications_enabled:
         return False
-    return not profiles_equal(previous_profile, target_profile)
+    return default_changed or bool(updated_sessions)
 
 
 def format_count(value: int, singular: str, plural: str) -> str:
@@ -829,11 +830,12 @@ def format_notification_message(
     settings: Settings,
     usage: UsageSnapshot,
     decision: Decision,
-    previous_profile: ManagedProfile | None,
+    current_profile: ManagedProfile | None,
+    updated_sessions: list[str],
     *,
     test: bool,
 ) -> str:
-    previous_text = display_profile_compact(previous_profile)
+    previous_text = display_profile_compact(current_profile)
     target_text = display_profile_compact(decision.target_profile)
     five_text = format_percentage(usage.five_hour_left)
     week_text = format_percentage(usage.week_left)
@@ -847,12 +849,20 @@ def format_notification_message(
             f"Target: {target_text}",
         ]
     else:
-        header_lines = [
-            separator,
-            "Model changed",
-            f"From: {previous_text}",
-            f"To:   {target_text}",
-        ]
+        if not profiles_equal(current_profile, decision.target_profile):
+            header_lines = [
+                separator,
+                "Model changed",
+                f"From: {previous_text}",
+                f"To:   {target_text}",
+            ]
+        else:
+            header_lines = [
+                separator,
+                "Managed sessions updated",
+                f"Target: {target_text}",
+                f"Count:  {len(updated_sessions)}",
+            ]
     quota_lines = (
         f"5h balance at {five_text} will be reset in {five_reset_text}\n"
         f"Weekly balance at {week_text} will be reset in {week_reset_text}"
@@ -1032,7 +1042,8 @@ def main() -> int:
             settings,
             usage,
             decision,
-            previous_profile,
+            current_profile,
+            updated_sessions=[],
             test=True,
         )
         delivered = send_notification_message(settings, message, dry_run=args.dry_run)
@@ -1059,12 +1070,17 @@ def main() -> int:
         args.dry_run,
     )
     notification_sent_to: list[str] = []
-    if should_send_notification(settings, previous_profile, decision.target_profile):
+    if should_send_notification(
+        settings,
+        default_changed=default_changed,
+        updated_sessions=updated_sessions,
+    ):
         message = format_notification_message(
             settings,
             usage,
             decision,
-            previous_profile,
+            current_profile,
+            updated_sessions=updated_sessions,
             test=False,
         )
         notification_sent_to = send_notification_message(settings, message, dry_run=args.dry_run)

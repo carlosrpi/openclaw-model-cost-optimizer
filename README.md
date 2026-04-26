@@ -59,13 +59,13 @@ Inside the Python script, the logical flow is:
    - and the weekly reset is still more than `weekly_balance.days_left_override_condition` days away
    - then force band `1`
 5. Convert the final band into a target `model + thinking` profile.
-6. Compare that target profile with the current OpenClaw defaults and the optimizer's remembered state.
+6. Compare that target profile with the current OpenClaw defaults and the optimizer's session-management bookkeeping.
 7. If a change is needed, apply it through official OpenClaw interfaces:
    - `openclaw models set ...`
    - `openclaw config set agents.defaults.thinkingDefault ...`
    - `openclaw gateway call sessions.patch ...` for managed sessions
-8. If notifications are enabled and the managed profile changed, send the message through OpenClaw.
-9. Save the optimizer state file so the next run knows what profile it last applied.
+8. If notifications are enabled and the optimizer actually changes OpenClaw during this run, send the message through OpenClaw.
+9. Save the optimizer state file for later session-reconciliation bookkeeping.
 
 In short, the timer/service layer is only the scheduler. The real decision logic lives in the Python script, and the Python script treats OpenClaw as an external system that it reads from and updates through supported commands.
 
@@ -222,7 +222,7 @@ Important behavior that is not obvious from the example alone:
 - The same `openclaw.provider` value is also used to normalize bare model names and to ignore sessions that belong to a different provider.
 - `behavior.manage_sessions = false` keeps the optimizer at the global-default level only and skips `sessions.patch`.
 - `behavior.active_minutes` is forwarded to `openclaw sessions --active ...` so only recently active sessions are considered for automatic reconciliation.
-- `files.state_path` stores both the last applied managed profile and the per-session bookkeeping used to avoid overwriting manual-looking session changes.
+- `files.state_path` stores the last applied profile plus the per-session bookkeeping used for later session reconciliation. Notifications do not depend on that history.
 
 ## Current Policy
 
@@ -290,9 +290,9 @@ then the optimizer ignores the previously selected band and uses band `1`.
 
 ## Notifications
 
-The watchdog can optionally send a notification when the managed model/thinking profile changes.
+The watchdog can optionally send a notification when it actually changes OpenClaw model/thinking settings during a run.
 
-This is useful if you want to know when the agent is no longer running on `high`, so you can apply more manual verification to the answers.
+This is useful both for quota-driven policy changes and for cases where the optimizer corrects an externally introduced mismatch.
 
 Notifications are sent through OpenClaw itself:
 
@@ -308,7 +308,7 @@ Each notification destination can also set:
 
 Recommended initial notification policy:
 
-- notify every time the managed profile changes
+- notify every time the optimizer actually changes OpenClaw defaults or managed sessions
 
 Example notification config:
 
@@ -329,11 +329,15 @@ silent = false
 Example message:
 
 ```text
-Managed profile changed from openai-codex/gpt-5.4 | thinking High to openai-codex/gpt-5.4-mini | thinking High
+.................................................
+Model changed
+From: openai-codex/gpt-5.4 High
+To:   openai-codex/gpt-5.4-mini High
 Reason: 5h balance 28% selects band 1 (0%..30%)
------------------------------------------------------
+.................................................
 5h balance at 28% will be reset in 1 hour 58 minutes
 Weekly balance at 61% will be reset in 4 days 7 hours 12 minutes
+.................................................
 ```
 
 ## Why It Also Updates Sessions
