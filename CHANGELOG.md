@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed a reset-soon edge case that could incorrectly demote the highest selected 5-hour band when `allow_highest_band = false`.
+- Expanded notification reasons so they include the full decision chain instead of only the first reason line.
 - Simplified session management so each run directly enforces the rule-selected profile on OpenClaw defaults and matching sessions.
 - Removed the optimizer state file and the manual-override preservation heuristic that depended on it.
 - Removed the optimizer's own `--json` output mode while keeping the internal OpenClaw JSON API calls it relies on.

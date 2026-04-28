@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -520,10 +521,14 @@ def raise_band(
 
     bands = settings.five_hour_balance_bands
     start_index = bands.index(base_band)
-    target_index = min(start_index + max_steps, len(bands) - 1)
-
+    highest_allowed_index = len(bands) - 1
     if not allow_highest_band and len(bands) > 1:
-        target_index = min(target_index, len(bands) - 2)
+        highest_allowed_index = len(bands) - 2
+
+    # The reset-soon bonus is allowed to upgrade or no-op, but never downgrade
+    # a band that was already selected by the core policy.
+    highest_allowed_index = max(start_index, highest_allowed_index)
+    target_index = min(start_index + max_steps, highest_allowed_index)
 
     return bands[target_index]
 
@@ -797,7 +802,11 @@ def normalize_reason_text(reason: str) -> str:
 def build_reason_text(decision: Decision) -> str:
     if not decision.reasons:
         return "No reason available"
-    return normalize_reason_text(decision.reasons[0])
+    return "; ".join(normalize_reason_text(reason) for reason in decision.reasons)
+
+
+def format_change_timestamp() -> str:
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def format_notification_message(
@@ -826,7 +835,7 @@ def format_notification_message(
         if not profiles_equal(current_profile, decision.target_profile):
             header_lines = [
                 separator,
-                "Model changed",
+                f"Model change {format_change_timestamp()}",
                 f"From: {previous_text}",
                 f"To:   {target_text}",
             ]
