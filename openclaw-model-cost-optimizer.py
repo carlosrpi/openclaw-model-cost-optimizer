@@ -837,7 +837,7 @@ def format_notification_message(
                 separator,
                 f"Model change {format_change_timestamp()}",
                 f"From: {previous_text}",
-                f"To:   {target_text}",
+                f"To: {target_text}",
             ]
         else:
             header_lines = [
